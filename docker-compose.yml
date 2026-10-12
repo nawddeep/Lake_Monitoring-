@@ -1,0 +1,13 @@
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: lake
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: lake_monitoring
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+volumes:
+  pgdata:
