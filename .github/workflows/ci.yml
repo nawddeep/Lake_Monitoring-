@@ -42,6 +42,11 @@ jobs:
       DATABASE_URL: postgresql://lake:ci_only_password@localhost:5432/lake_monitoring
       NEXT_TELEMETRY_DISABLED: "1"
       PRISMA_HIDE_UPDATE_MESSAGE: "1"
+      # Placeholder auth/app settings so the template builds. CI-only, not real secrets.
+      BETTER_AUTH_SECRET: ci-only-placeholder-secret-not-used-anywhere-real
+      BETTER_AUTH_URL: http://localhost:3000
+      APP_URL: http://localhost:3000
+      INVITATION_EMAIL_ENABLED: "false"
 
     steps:
       - name: Check out code
@@ -72,7 +77,7 @@ jobs:
         run: npm run lint
 
       - name: Type-check
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
       - name: Apply migrations to a fresh database
         run: npx prisma migrate deploy
