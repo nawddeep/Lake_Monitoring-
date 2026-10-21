@@ -1,0 +1,86 @@
+# Continuous integration: every push to main and every pull request must pass these checks.
+# Deployment (CD) is not set up yet.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Lint, types, migrations, build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    # Throwaway PostgreSQL 18 that exists only for this run. The password is CI-only,
+    # not the one in your local .env.
+    services:
+      db:
+        image: postgres:18
+        env:
+          POSTGRES_USER: lake
+          POSTGRES_PASSWORD: ci_only_password
+          POSTGRES_DB: lake_monitoring
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lake -d lake_monitoring"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      DATABASE_URL: postgresql://lake:ci_only_password@localhost:5432/lake_monitoring
+      NEXT_TELEMETRY_DISABLED: "1"
+      PRISMA_HIDE_UPDATE_MESSAGE: "1"
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js (version from .nvmrc)
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies (exact versions from package-lock.json)
+        run: npm ci
+
+      - name: Check Prisma is still 7.10.0
+        run: |
+          npx prisma --version
+          npx prisma --version | grep -E '^prisma +: 7\.10\.0$' > /dev/null \
+            || { echo "::error::prisma must stay at 7.10.0 (see the setup rules)"; exit 1; }
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Apply migrations to a fresh database
+        run: npx prisma migrate deploy
+
+      - name: Check schema.prisma has no changes missing a migration
+        run: |
+          npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code \
+            || { echo "::error::prisma/schema.prisma differs from the migrations. Run 'npx prisma migrate dev --name <change>' and commit the new migration."; exit 1; }
+
+      - name: Build
+        run: npm run build
