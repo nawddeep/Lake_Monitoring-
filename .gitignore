@@ -41,3 +41,23 @@ yarn-error.log*
 next-env.d.ts
 
 /generated/prisma
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.db
+
+# Binaries & Archives
+arduino-cli.exe
+cli.zip
+*.zip
+
+# Temporary test scripts
+test_repl.py
+test_ports.ps1
+identify_boards.ps1
+identify_com13.ps1
+debug_serial.ps1
+search_user_history.py
+grant_mysql.py

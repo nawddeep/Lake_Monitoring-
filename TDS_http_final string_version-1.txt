@@ -1,0 +1,265 @@
+//Including libraries
+#include <Wire.h>
+#include <ESP8266WiFi.h>
+#include <SoftwareSerial.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <String.h>
+#include <ESP8266WiFi.h>
+#include <ESP8266WiFiMulti.h>
+#include <ESP8266HTTPClient.h>
+#include <WiFiClientSecureBearSSL.h>
+// Fingerprint for demo URL, expires on June 2, 2021, needs to be updated well before this date
+const uint8_t fingerprint[20] = { 0x06, 0x4F, 0x20, 0x60, 0x1C, 0x50, 0xA7, 0x12, 0xC8, 0x4B, 0xC2, 0x13, 0xC3, 0xCD, 0x6F, 0x79,
+0xF1, 0x91, 0x06, 0x9C };
+
+ESP8266WiFiMulti WiFiMulti;
+
+//-------------------------------------------------------------------------------------
+// initializing cloud 
+String apiKey = "XP9RPDGQVODW0722";     //  Enter your Write API key from ThingSpeak
+const char *ssid =  "Techno India NJR";     // replace with your wifi ssid and wpa2 key
+const char *pass =  "12345678";
+
+WiFiClient client;
+//-------------------------------------------------------------------------------------
+//TDS pins 
+#define TdsSensorPin A0
+#define VREF 3.3              // analog reference voltage(Volt) of the ADC
+#define SCOUNT  30            // sum of sample point
+#define TRIG D7 //Module pins
+#define ECHO D6 
+
+int analogBuffer[SCOUNT];     // store the analog value in the array, read from ADC
+int analogBufferTemp[SCOUNT];
+int analogBufferIndex = 0;
+int copyIndex = 0;
+float distance = 0;
+float averageVoltage = 0;
+float tdsValue = 0;
+float temperature = 23;       // current temperature for compensation
+
+// median filtering algorithm
+int getMedianNum(int bArray[], int iFilterLen){
+  int bTab[iFilterLen];
+  for (byte i = 0; i<iFilterLen; i++)
+  bTab[i] = bArray[i];
+  int i, j, bTemp;
+  for (j = 0; j < iFilterLen - 1; j++) {
+    for (i = 0; i < iFilterLen - j - 1; i++) {
+      if (bTab[i] > bTab[i + 1]) {
+        bTemp = bTab[i];
+        bTab[i] = bTab[i + 1];
+        bTab[i + 1] = bTemp;
+      }
+    }
+  }
+  if ((iFilterLen & 1) > 0){
+    bTemp = bTab[(iFilterLen - 1) / 2];
+  }
+  else {
+    bTemp = (bTab[iFilterLen / 2] + bTab[iFilterLen / 2 - 1]) / 2;
+  }
+  return bTemp;
+}
+void setup() 
+
+{
+  
+  Serial.begin(115200);
+  pinMode(TdsSensorPin,INPUT);
+  pinMode(TRIG, OUTPUT); // Initializing Trigger Output and Echo Input 
+  pinMode(ECHO, INPUT_PULLUP);
+
+  
+   Serial.begin(115200);
+for (uint8_t t = 4; t > 0; t--)
+	 {
+    		Serial.printf("[SETUP] WAIT %d...\n", t);
+   		 Serial.flush();
+   		 delay(1000);
+  	}
+
+  WiFi.mode(WIFI_STA);
+  WiFiMulti.addAP("Techno India NJR", "12345678");
+ 
+   
+}
+
+   
+
+void loop() 
+{
+ 
+  static unsigned long analogSampleTimepoint = millis();
+  if(millis()-analogSampleTimepoint > 40U)
+  {     //every 40 milliseconds,read the analog value from the ADC
+    analogSampleTimepoint = millis();
+    analogBuffer[analogBufferIndex] = analogRead(TdsSensorPin);    //read the analog value and store into the buffer
+    analogBufferIndex++;
+    if(analogBufferIndex == SCOUNT)
+    { 
+      analogBufferIndex = 0;
+    }
+  }   
+  
+  static unsigned long printTimepoint = millis();
+  if(millis()-printTimepoint > 800U)
+  {
+    printTimepoint = millis();
+    for(copyIndex=0; copyIndex<SCOUNT; copyIndex++)
+    {
+      analogBufferTemp[copyIndex] = analogBuffer[copyIndex];
+      
+      // read the analog value more stable by the median filtering algorithm, and convert to voltage value
+      averageVoltage = getMedianNum(analogBufferTemp,SCOUNT) * (float)VREF / 1024.0;
+      
+      //temperature compensation formula: fFinalResult(25^C) = fFinalResult(current)/(1.0+0.02*(fTP-25.0)); 
+      float compensationCoefficient = 1.0+0.02*(temperature-25.0);
+      //temperature compensation
+      float compensationVoltage=averageVoltage/compensationCoefficient;
+      
+      //convert voltage value to tds value
+      tdsValue=(133.42*compensationVoltage*compensationVoltage*compensationVoltage - 255.86*compensationVoltage*compensationVoltage + 857.39*compensationVoltage)*0.5;
+      
+      //Serial.print("voltage:");
+      //Serial.print(averageVoltage,2);
+      //Serial.print("V   ");
+      Serial.print("TDS Value:");
+      Serial.print(tdsValue,0);
+      Serial.println("ppm");
+    }
+  }
+    
+    digitalWrite(TRIG, LOW); // Set the trigger pin to low for 2uS 
+    delayMicroseconds(2); 
+    
+    digitalWrite(TRIG, HIGH); // Send a 10uS high to trigger ranging 
+    delayMicroseconds(20); 
+    
+    digitalWrite(TRIG, LOW); // Send pin low again 
+    int distance = pulseIn(ECHO, HIGH,26000); // Read in times pulse 
+    
+ //Convert the pulse duration to distance
+    distance/=58;   //You can add other math functions to calibrate it well
+                           
+    Serial.print("Distance ");
+    Serial.print(distance);
+    Serial.println("cm");
+   
+    // delay(2000);
+    Serial.println("hi");
+// if ((WiFiMulti.run() == WL_CONNECTED)) 
+
+// {
+//     Serial.println("hi2");    
+//     std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
+
+//     client->setFingerprint(fingerprint);
+    
+//     HTTPClient https;
+
+//     Serial.print("[HTTPS] begin...\n");
+//     client->setInsecure();    
+    
+//     if (https.begin(*client, "https://wqs.technonjr.org/tds_depth.php?lakename=Techno%20Lab&readingtime=2023-08-04%2004:40&tds="+String(tdsValue)+"&depth="+String(distance))) 
+
+
+// 	    {   Serial.print("[HTTPS] GET...\n");
+//             int httpCode = https.GET();
+//             Serial.printf("[HTTPS] GET... code: %d\n", httpCode);
+
+//             if (httpCode > 0) 
+// 		      {
+//         		// HTTP header has been send and Server response header has been handled
+        		
+
+//         		// file found at server
+//         		if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) 
+// 			        {
+//           			String payload = https.getString();
+//           			Serial.println(payload);
+//         	  	}
+//       		} 
+// 	else 
+// 	{
+//         Serial.printf("[HTTPS] GET... failed, error: %s\n", https.errorToString(httpCode).c_str());
+//       	}
+
+//       https.end();
+//     } 
+// else 
+// 	{
+//       		Serial.printf("[HTTPS] Unable to connect\n");
+//     	}
+  
+
+
+
+ 
+//           Serial.println("Waiting...");
+  
+//   // thingspeak needs minimum 15 sec delay between updates, i've set it to 30 seconds
+//   delay(5000);
+
+if ((WiFiMulti.run() == WL_CONNECTED)) 
+
+{
+
+    std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
+
+    // client->setFingerprint(fingerprint);
+    
+    HTTPClient https;
+
+    Serial.print("[HTTPS] begin...\n");
+    client->setInsecure();
+        
+    //if (https.begin(*client, "https://wqs.technonjr.org/temp_ph.php?lakename=Techno%20Lab&temperature="+String(temp)+"&phlevel="+String(ph_act)))
+    if (https.begin(*client, "https://wqs.technonjr.org/tds_depth.php?lakename=Techno%20Lab&readingtime=2023-08-04%2004:40&tds="+String(tdsValue)+"&depth="+String(distance)))
+
+	    {   Serial.print("[HTTPS] GET...\n");
+            int httpCode = https.GET();
+            	Serial.printf("[HTTPS] GET... code before : %d\n", httpCode);
+            
+
+            if (httpCode > 0) 
+		      {
+        		// HTTP header has been send and Server response header has been handled
+        		Serial.printf("[HTTPS] GET... code: %d\n", httpCode);
+
+        		// file found at server
+        		if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) 
+			        {
+          			String payload = https.getString();
+          			Serial.println("The payload is : ");
+          			Serial.println(payload);
+        	  	}
+      		} 
+	else 
+	{
+        Serial.printf("[HTTPS] GET... failed, error: %s\n", https.errorToString(httpCode).c_str());
+      	}
+
+      https.end();
+    } 
+else 
+	{
+      		Serial.printf("[HTTPS] Unable to connect\n");
+    	}
+  
+
+
+
+ 
+          Serial.println("Waiting...");
+  
+  // thingspeak needs minimum 15 sec delay between updates, i've set it to 30 seconds
+  delay(6000);
+}
+}
+
+
+    
+
+

@@ -1,0 +1,11 @@
+{
+  "apiBase": "/api",
+  "loginPath": null,
+  "refreshSeconds": 10,
+  "requestTimeoutSeconds": 15,
+  "timezone": "Asia/Kolkata",
+  "timezoneLabel": "IST",
+  "samplingMinutes": 10,
+  "gapFactor": 2.5,
+  "defaultRange": "7d"
+}
