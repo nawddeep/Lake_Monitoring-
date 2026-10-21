@@ -30,7 +30,7 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files
 .env*
 !.env.example
 
@@ -46,18 +46,29 @@ next-env.d.ts
 
 /generated/prisma
 
+# Nested clones / subprojects
+lake-monitoring-web/
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
+/bridge/spool.jsonl
+/bridge/.venv/
+
+# Databases & local storage
 *.db
+*.sqlite
+*.sqlite3
 
 # Binaries & Archives
 arduino-cli.exe
 cli.zip
 *.zip
+*.tar.gz
+*.exe
 
-# Temporary test scripts
+# Hardware debug & temporary test scripts
 test_repl.py
 test_ports.ps1
 identify_boards.ps1
@@ -65,9 +76,31 @@ identify_com13.ps1
 debug_serial.ps1
 search_user_history.py
 grant_mysql.py
+test_mysql.py
+test_snapshot.py
+test_sql_endpoints.py
+Ph_http*.txt
+TDS_http*.txt
 
-# Python bridge
-/bridge/spool.jsonl
-__pycache__/
-*.pyc
-/bridge/.venv/
+# Research reports & generated documents
+*.docx
+*.pdf
+Aarogya_Jal_*.html
+Fateh_Sagar_Lake_Smart_Monitoring_Report.html
+generate_*.py
+fetch_competitors.py
+
+# Competitor research media & UI mockups
+competitor_images/
+dashboard_ui/
+aquagenx_cbt.jpg
+aqvify_site_image.jpg
+cluix_device.jpg
+kando_dashboard.png
+kando_hardware.jpg
+ketos_hardware_software.png
+omnivis_device.jpg
+omnivis_ui.png
+scan_spectrolyser.jpg
+ysi_exo_hardware.jpg
+ysi_hydrosphere_software.jpg
