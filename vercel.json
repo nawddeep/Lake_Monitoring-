@@ -1,3 +1,4 @@
 {
+  "regions": ["hnd1"],
   "buildCommand": "prisma generate && if [ \"$VERCEL_ENV\" = \"production\" ]; then prisma migrate deploy; else echo 'Preview build: skipping prisma migrate deploy'; fi && next build"
 }
