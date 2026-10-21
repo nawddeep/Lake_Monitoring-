@@ -66,6 +66,20 @@ posts, `http://localhost:5000/api/latest`.
 - Optional: set `INGEST_TOKEN` and have the firmware send it as `X-Ingest-Token` (or `?token=`) so
   other devices on the network can't post fake readings.
 
+## Running on Vercel (the `bridge` service)
+
+`vercel.json` deploys this folder as the `bridge` service next to the Next.js app, on the same
+domain. Public paths: `/api/telemetry`, `/unified_telemetry.php`, `/temp_ph.php`, `/tds_depth.php`
+and `/api/bridge/health`, `/api/bridge/latest`. Everything else goes to the app.
+
+- On Vercel the endpoints are public, so **ingest is refused unless `INGEST_TOKEN` is set** in the
+  Vercel environment, and the boards must send it (`X-Ingest-Token` header or `?token=`).
+- It uses the project's shared `DATABASE_URL` (Supabase transaction pooler, port 6543);
+  prepared statements are disabled for that.
+- The spool file lives in `/tmp` there and is temporary.
+- The boards must post to `https://<your-domain>/...`. Vercel serves HTTPS only, so the ESP
+  firmware needs a TLS-capable client (for example `WiFiClientSecure` on ESP8266/ESP32).
+
 ## Security
 
 - Database passwords, Wi-Fi passwords and API keys go in `bridge/.env` (or the firmware's local

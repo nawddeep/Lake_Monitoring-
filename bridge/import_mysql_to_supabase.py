@@ -113,7 +113,7 @@ def main():
         return
 
     inserted = 0
-    with psycopg.connect(lake_db.database_url()) as conn:
+    with psycopg.connect(lake_db.database_url(), prepare_threshold=None) as conn:
         for station, station_rows in by_station.items():
             first = datetime.fromtimestamp(min(r["epoch_time"] for r in station_rows), timezone.utc)
             refs = lake_db.ensure_station_refs(conn, station, installed_at=first)
