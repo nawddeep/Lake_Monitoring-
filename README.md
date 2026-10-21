@@ -5,17 +5,43 @@ Web app for the lake monitoring platform. Built on the
 Better Auth, with organizations, members, invitations, roles, and separate admin and customer
 portals. Template docs: [docs.saasfoundation.dev](https://docs.saasfoundation.dev).
 
-This branch is the foundation only. The lake data tables (sites, stations, sensors, readings,
-calibrations, samples, alerts) are added in a later step, linked to the template's users and
-organizations.
+The lake data tables (sites, stations, sensors, sensor installations, parameters, readings,
+calibrations, samples, alerts) are linked to the template's users and organizations. The
+`bridge/` folder receives readings from the ESP sensor boards.
 
-## Prerequisites
+## Quick start (Docker only)
+
+Needs only [Docker Desktop](https://docs.docker.com/get-docker/), running. No Node.js, no `.env`.
+
+```bash
+git clone https://github.com/nawddeep/Lake_Monitoring-.git lake-monitoring-web
+cd lake-monitoring-web && docker compose up
+```
+
+Open http://localhost:3000. The first start takes a minute or two (it installs dependencies inside
+the container). `docker compose up` starts PostgreSQL 18, applies all migrations to it and runs the
+app. **Everything uses the local PostgreSQL in Docker**, never the shared Supabase database.
+
+Create your login (asks for name, email and password):
+
+```bash
+docker compose exec app npm run admin:create
+```
+
+Optional:
+
+- Sensor bridge on port 5000: `docker compose --profile bridge up`
+  (macOS uses port 5000 for AirPlay: `BRIDGE_PORT=5001 docker compose --profile bridge up`)
+- Change settings: `cp .env.example .env` and edit. `.env.example` lists every variable.
+- Stop: `docker compose down` (data is kept). Wipe the local database: `docker compose down -v`.
+
+## Without Docker for the app (Node.js on your machine)
+
+Prerequisites:
 
 - Node.js 24 (see `.nvmrc`; with nvm run `nvm use`)
 - npm (comes with Node.js)
-- [Docker Desktop](https://docs.docker.com/get-docker/), running
-
-## Getting Started
+- [Docker Desktop](https://docs.docker.com/get-docker/), running (for PostgreSQL)
 
 1. Clone the repo:
 
@@ -36,9 +62,10 @@ organizations.
    npm run app:setup
    ```
 
-   This creates `.env` from `.env.example` if it doesn't exist, generates `BETTER_AUTH_SECRET`,
-   starts PostgreSQL in Docker, applies the migrations and asks for the admin's name, email and
-   password. Demo data is optional and off by default; it is fake data for local testing only.
+   This creates `.env` from `.env.example` if it doesn't exist (it points at the local
+   PostgreSQL), generates `BETTER_AUTH_SECRET`, starts PostgreSQL in Docker, applies the
+   migrations and asks for the admin's name, email and password. Demo data is optional and off by
+   default; it is fake data for local testing only.
 
 4. Start the development server and open http://localhost:3000:
 

@@ -135,12 +135,12 @@ def store(station_name, values):
     except Exception as e:  # network or database outage: keep the reading locally
         spool(station_name, measured_at, values)
         print(f"[SPOOLED] {station_name} {measured_at.isoformat()} {values} ({type(e).__name__})")
-        return jsonify({"status": "spooled", "database": "Supabase", "measured_at_utc": measured_at.isoformat()}), 202
+        return jsonify({"status": "spooled", "database": "PostgreSQL", "measured_at_utc": measured_at.isoformat()}), 202
     flush_spool()
     print(f"[STORED] {station_name} {measured_at.isoformat()} {values} -> {stored} new row(s)")
     return jsonify({
         "status": "success",
-        "database": "Supabase",
+        "database": "PostgreSQL",
         "station": station_name,
         "measured_at_utc": measured_at.isoformat(),
         "stored": {k: v for k, v in values.items() if v is not None},
