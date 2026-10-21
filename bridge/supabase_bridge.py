@@ -6,14 +6,18 @@ not need to change: the same endpoints are served on the same port.
   POST/GET /api/telemetry          all four values (also /unified_telemetry.php)
   POST/GET /temp_ph.php            ?temperature=..&phlevel=..
   POST/GET /tds_depth.php          ?tds=..&depth=..
-  GET      /health                 bridge and database status
-  GET      /api/latest             latest stored value per parameter
+  GET      /health                 bridge and database status (also /api/bridge/health)
+  GET      /api/latest             latest stored value per parameter (also /api/bridge/latest)
 
 Each value becomes one row in the `reading` table, stamped with the time the bridge received
 it (UTC). Missing values are skipped, never stored as 0. No water-quality verdict is computed.
 If Supabase is unreachable, readings are written to a local spool file and sent later.
 
 Configuration comes from bridge/.env (see bridge/.env.example). Run:  python supabase_bridge.py
+
+On Vercel (the `bridge` service in vercel.json) the same `app` object runs as a function:
+the pool opens on first use, the spool lives in /tmp (temporary), and ingest is refused
+unless INGEST_TOKEN is set, because the endpoints are public there.
 """
 
 import json
@@ -37,25 +41,39 @@ STATION_NAME = os.environ.get("STATION_NAME", "FS_LAKE_STATION_01")
 ALLOWED_STATIONS = {
     s.strip() for s in os.environ.get("ALLOWED_STATIONS", STATION_NAME).split(",") if s.strip()
 }
+ON_VERCEL = bool(os.environ.get("VERCEL"))
 INGEST_TOKEN = os.environ.get("INGEST_TOKEN", "")
-SPOOL_PATH = os.environ.get("SPOOL_PATH", os.path.join(HERE, "spool.jsonl"))
+# Vercel's filesystem is read-only except /tmp, which is temporary.
+SPOOL_PATH = os.environ.get("SPOOL_PATH", "/tmp/spool.jsonl" if ON_VERCEL else os.path.join(HERE, "spool.jsonl"))
 PORT = int(os.environ.get("PORT", "5000"))
 DB_TIMEOUT_S = float(os.environ.get("DB_TIMEOUT_S", "5"))  # give up quickly and spool if Supabase is down
 
 app = Flask(__name__)
+# prepare_threshold=None: Supabase's transaction pooler (port 6543) does not support prepared
+# statements, which psycopg would otherwise start using after a few queries.
 pool = ConnectionPool(
-    lake_db.database_url(), min_size=1, max_size=4, open=False,
-    kwargs={"autocommit": True, "connect_timeout": 10}
+    lake_db.database_url(), min_size=0 if ON_VERCEL else 1, max_size=4, open=False,
+    kwargs={"autocommit": True, "connect_timeout": 10, "prepare_threshold": None}
 )
+_pool_lock = threading.Lock()
 _refs_cache = {}
 _refs_lock = threading.Lock()
 _spool_lock = threading.Lock()
 
 
+def get_pool():
+    """Open the pool on first use: on Vercel there is no __main__ block to open it."""
+    if pool.closed:
+        with _pool_lock:
+            if pool.closed:
+                pool.open(wait=False)
+    return pool
+
+
 def refs_for(station_name):
     with _refs_lock:
         if station_name not in _refs_cache:
-            with pool.connection(timeout=DB_TIMEOUT_S) as conn:
+            with get_pool().connection(timeout=DB_TIMEOUT_S) as conn:
                 _refs_cache[station_name] = lake_db.ensure_station_refs(conn, station_name)
         return _refs_cache[station_name]
 
@@ -74,7 +92,7 @@ def to_float(*candidates):
 
 def write(station_name, measured_at, values):
     refs = refs_for(station_name)
-    with pool.connection(timeout=DB_TIMEOUT_S) as conn, conn.cursor() as cur:
+    with get_pool().connection(timeout=DB_TIMEOUT_S) as conn, conn.cursor() as cur:
         return lake_db.insert_readings(cur, refs, measured_at, values)
 
 
@@ -131,7 +149,7 @@ def store(station_name, values):
 
 def authorised():
     if not INGEST_TOKEN:
-        return True
+        return not ON_VERCEL  # public on Vercel: never accept readings without a token
     return INGEST_TOKEN in (request.headers.get("X-Ingest-Token"), request.args.get("token"))
 
 
@@ -140,6 +158,8 @@ def payload():
 
 
 def unauthorised():
+    if ON_VERCEL and not INGEST_TOKEN:
+        return jsonify({"status": "error", "message": "INGEST_TOKEN is not configured on the server"}), 503
     return jsonify({"status": "error", "message": "Invalid ingest token"}), 401
 
 
@@ -185,9 +205,10 @@ def tds_depth():
 
 
 @app.route("/health")
+@app.route("/api/bridge/health")
 def health():
     try:
-        with pool.connection(timeout=10) as conn:
+        with get_pool().connection(timeout=10) as conn:
             conn.execute("SELECT 1")
         db = "ok"
     except Exception as e:
@@ -200,9 +221,10 @@ def health():
 
 
 @app.route("/api/latest")
+@app.route("/api/bridge/latest")
 def latest():
     station = request.args.get("station_id", STATION_NAME)
-    with pool.connection() as conn, conn.cursor() as cur:
+    with get_pool().connection(timeout=DB_TIMEOUT_S) as conn, conn.cursor() as cur:
         cur.execute(
             """
             SELECT DISTINCT ON (p.code) p.code, p.name, p.unit, r.value, r.flag::text, r.measured_at
@@ -225,7 +247,7 @@ def latest():
 
 
 if __name__ == "__main__":
-    pool.open(wait=False)
+    get_pool()
     print(f"[BRIDGE] Station {STATION_NAME} | allowed stations: {', '.join(sorted(ALLOWED_STATIONS))}")
     print(f"[BRIDGE] Ingest token: {'required' if INGEST_TOKEN else 'not required (set INGEST_TOKEN to require one)'}")
     print(f"[BRIDGE] Listening on http://0.0.0.0:{PORT}  (health: /health)")

@@ -1,3 +1,24 @@
 {
-  "buildCommand": "prisma generate && if [ \"$VERCEL_ENV\" = \"production\" ]; then prisma migrate deploy; else echo 'Preview build: skipping prisma migrate deploy'; fi && next build"
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": ["hnd1"],
+  "services": {
+    "app": {
+      "root": ".",
+      "framework": "nextjs",
+      "buildCommand": "prisma generate && if [ \"$VERCEL_ENV\" = \"production\" ]; then prisma migrate deploy; else echo 'Preview build: skipping prisma migrate deploy'; fi && next build"
+    },
+    "bridge": {
+      "root": "bridge",
+      "framework": "flask",
+      "entrypoint": "supabase_bridge:app"
+    }
+  },
+  "rewrites": [
+    { "source": "/api/telemetry", "destination": { "service": "bridge" } },
+    { "source": "/unified_telemetry.php", "destination": { "service": "bridge" } },
+    { "source": "/temp_ph.php", "destination": { "service": "bridge" } },
+    { "source": "/tds_depth.php", "destination": { "service": "bridge" } },
+    { "source": "/api/bridge/(.*)", "destination": { "service": "bridge" } },
+    { "source": "/(.*)", "destination": { "service": "app" } }
+  ]
 }
