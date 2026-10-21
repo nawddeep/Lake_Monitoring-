@@ -46,6 +46,35 @@ organizations.
    npm run dev
    ```
 
+## Shared database (Supabase)
+
+The team's shared database is PostgreSQL on Supabase (Singapore region). The app connects to it
+directly through Prisma; Supabase Auth, Storage and the Supabase JS client are not used.
+
+1. Ask the project owner for the connection string (session pooler, port 5432). It contains the
+   database password, so it is shared privately, never committed.
+2. In `.env`, set both lines to that string:
+
+   ```dotenv
+   DATABASE_URL="postgresql://postgres.<project-ref>:<password>@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres"
+   DIRECT_URL="postgresql://postgres.<project-ref>:<password>@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres"
+   ```
+
+3. Run `npm run dev`. Do not run `npm run app:setup` against the shared database.
+
+Rules for the shared database:
+
+- Apply migrations with `npx prisma migrate deploy` only. Never run `prisma migrate reset` or
+  `prisma migrate dev` against it: `reset` deletes all data.
+- Every table in `public` must have row-level security enabled (see the
+  `enable_row_level_security` migration). Supabase's public Data API roles can otherwise read
+  tables directly. New migrations that create tables must enable RLS on them too.
+- Use the session pooler string, not the direct `db.<project-ref>.supabase.co` one: the direct
+  host is IPv6-only and fails on many networks.
+
+To work against the local Docker database instead, point `DATABASE_URL` back at
+`postgresql://lake:<password>@localhost:5432/lake_monitoring` and remove `DIRECT_URL`.
+
 ## Checks
 
 CI (`.github/workflows/ci.yml`) runs on every pull request and push to `main`: install, Prisma
