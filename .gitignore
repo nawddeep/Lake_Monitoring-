@@ -65,3 +65,9 @@ identify_com13.ps1
 debug_serial.ps1
 search_user_history.py
 grant_mysql.py
+
+# Python bridge
+/bridge/spool.jsonl
+__pycache__/
+*.pyc
+/bridge/.venv/

@@ -30,6 +30,11 @@ model User {
   invitations   Invitation[]
   apiKeys       Apikey[]
 
+  // Lake monitoring
+  calibrationsPerformed Calibration[]
+  samplesCollected      Sample[]
+  alertsAcknowledged    Alert[]
+
   @@unique([email])
   @@map("user")
 }
@@ -96,6 +101,9 @@ model Organization {
   members     Member[]
   invitations Invitation[]
 
+  // Lake monitoring
+  sites Site[]
+
   @@map("organization")
 }
 
@@ -160,4 +168,278 @@ model Apikey {
   @@index([referenceId])
   @@index([configId])
   @@map("apikey")
+}
+
+// =============================================================================
+// Lake monitoring
+// Linked to the template's `organization` and `user` tables. All times are UTC.
+// Every table here has row-level security enabled in its migration (Supabase).
+// =============================================================================
+
+enum StationKind {
+  PHYSICAL
+  SIMULATED // digital twin: kept apart so test data never mixes with real data
+
+  @@map("station_kind")
+}
+
+enum ReadingFlag {
+  OK
+  SUSPECT
+  BAD
+
+  @@map("reading_flag")
+}
+
+enum SampleSource {
+  LAB
+  FIELD_KIT
+
+  @@map("sample_source")
+}
+
+enum ResultQualifier {
+  EQUAL
+  LESS_THAN // for lab results reported as "<1"
+  GREATER_THAN
+
+  @@map("result_qualifier")
+}
+
+enum AlertSeverity {
+  LOW
+  MEDIUM
+  HIGH
+
+  @@map("alert_severity")
+}
+
+enum AlertStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+
+  @@map("alert_status")
+}
+
+// ---------- Places and hardware ----------
+
+model Site {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id")
+  name           String // e.g. "Fateh Sagar Lake"
+  description    String?
+  latitude       Decimal? @db.Decimal(9, 6)
+  longitude      Decimal? @db.Decimal(9, 6)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  stations     Station[]
+  samples      Sample[]
+
+  @@unique([organizationId, name])
+  @@map("site")
+}
+
+model Station {
+  id          String      @id @default(uuid()) @db.Uuid
+  siteId      String      @map("site_id") @db.Uuid
+  name        String
+  kind        StationKind @default(PHYSICAL)
+  latitude    Decimal?    @db.Decimal(9, 6)
+  longitude   Decimal?    @db.Decimal(9, 6)
+  installedAt DateTime?   @map("installed_at") @db.Timestamptz(6)
+  retiredAt   DateTime?   @map("retired_at") @db.Timestamptz(6)
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  site          Site                 @relation(fields: [siteId], references: [id])
+  installations SensorInstallation[]
+  readings      Reading[]
+  alerts        Alert[]
+  samples       Sample[]
+
+  @@unique([siteId, name])
+  @@map("station")
+}
+
+model Sensor {
+  id           String  @id @default(uuid()) @db.Uuid
+  serialNumber String  @unique @map("serial_number")
+  manufacturer String?
+  model        String?
+  notes        String?
+
+  installations SensorInstallation[]
+  readings      Reading[]
+  calibrations  Calibration[]
+
+  @@map("sensor")
+}
+
+// Which probe sat on which station, and when. Probes get swapped;
+// this keeps old readings credited to the right probe.
+model SensorInstallation {
+  id          String    @id @default(uuid()) @db.Uuid
+  sensorId    String    @map("sensor_id") @db.Uuid
+  stationId   String    @map("station_id") @db.Uuid
+  depthM      Decimal?  @map("depth_m") @db.Decimal(6, 2)
+  installedAt DateTime  @map("installed_at") @db.Timestamptz(6)
+  removedAt   DateTime? @map("removed_at") @db.Timestamptz(6)
+
+  sensor  Sensor  @relation(fields: [sensorId], references: [id])
+  station Station @relation(fields: [stationId], references: [id])
+
+  @@index([stationId, installedAt])
+  @@index([sensorId, installedAt])
+  @@map("sensor_installation")
+}
+
+// ---------- What gets measured ----------
+
+model Parameter {
+  id   Int    @id @default(autoincrement())
+  code String @unique // e.g. "ph", "water_temp_c"
+  name String // e.g. "Water temperature"
+  unit String // the one unit values are stored in, e.g. "°C"
+
+  limits        Limit[]
+  readings      Reading[]
+  sampleResults SampleResult[]
+  calibrations  Calibration[]
+  alerts        Alert[]
+
+  @@map("parameter")
+}
+
+// A water quality standard, e.g. "CPCB Class C" or "BIS 10500 acceptable".
+// Reference data only: the app does not grade lake water against these from four sensors.
+model Standard {
+  id     Int     @id @default(autoincrement())
+  name   String  @unique
+  source String?
+
+  limits Limit[]
+
+  @@map("standard")
+}
+
+model Limit {
+  id          Int    @id @default(autoincrement())
+  standardId  Int    @map("standard_id")
+  parameterId Int    @map("parameter_id")
+  minValue    Float? @map("min_value")
+  maxValue    Float? @map("max_value")
+
+  standard  Standard  @relation(fields: [standardId], references: [id])
+  parameter Parameter @relation(fields: [parameterId], references: [id])
+
+  @@unique([standardId, parameterId])
+  @@map("parameter_limit")
+}
+
+// ---------- Sensor data ----------
+
+// One value from one probe at one time. Raw values are never overwritten;
+// bad values are flagged instead.
+model Reading {
+  id          BigInt      @id @default(autoincrement())
+  stationId   String      @map("station_id") @db.Uuid
+  sensorId    String      @map("sensor_id") @db.Uuid
+  parameterId Int         @map("parameter_id")
+  measuredAt  DateTime    @map("measured_at") @db.Timestamptz(6)
+  value       Float
+  flag        ReadingFlag @default(OK)
+  receivedAt  DateTime    @default(now()) @map("received_at") @db.Timestamptz(6)
+
+  station   Station   @relation(fields: [stationId], references: [id])
+  sensor    Sensor    @relation(fields: [sensorId], references: [id])
+  parameter Parameter @relation(fields: [parameterId], references: [id])
+  alerts    Alert[]
+
+  // The same reading sent twice after a signal gap is stored once.
+  @@unique([sensorId, parameterId, measuredAt])
+  @@index([stationId, parameterId, measuredAt])
+  @@map("reading")
+}
+
+// Side-by-side checks against the handheld meter, and the correction applied.
+model Calibration {
+  id             String   @id @default(uuid()) @db.Uuid
+  sensorId       String   @map("sensor_id") @db.Uuid
+  parameterId    Int      @map("parameter_id")
+  performedAt    DateTime @map("performed_at") @db.Timestamptz(6)
+  performedById  String?  @map("performed_by_id")
+  referenceValue Float?   @map("reference_value") // what the handheld meter read
+  sensorBefore   Float?   @map("sensor_before") // what the probe read before cleaning
+  sensorAfter    Float?   @map("sensor_after") // what the probe read after cleaning
+  offset         Float? // correction to add from this time on
+  slope          Float?
+  notes          String?
+
+  sensor      Sensor    @relation(fields: [sensorId], references: [id])
+  parameter   Parameter @relation(fields: [parameterId], references: [id])
+  performedBy User?     @relation(fields: [performedById], references: [id])
+
+  @@index([sensorId, parameterId, performedAt])
+  @@map("calibration")
+}
+
+// ---------- Lab and field-kit tests ----------
+
+model Sample {
+  id            String       @id @default(uuid()) @db.Uuid
+  siteId        String       @map("site_id") @db.Uuid
+  stationId     String?      @map("station_id") @db.Uuid
+  source        SampleSource
+  collectedAt   DateTime     @map("collected_at") @db.Timestamptz(6)
+  depthM        Decimal?     @map("depth_m") @db.Decimal(6, 2)
+  labName       String?      @map("lab_name")
+  collectedById String?      @map("collected_by_id")
+  notes         String?
+
+  site        Site           @relation(fields: [siteId], references: [id])
+  station     Station?       @relation(fields: [stationId], references: [id])
+  collectedBy User?          @relation(fields: [collectedById], references: [id])
+  results     SampleResult[]
+
+  @@index([siteId, collectedAt])
+  @@map("sample")
+}
+
+model SampleResult {
+  id          String          @id @default(uuid()) @db.Uuid
+  sampleId    String          @map("sample_id") @db.Uuid
+  parameterId Int             @map("parameter_id")
+  value       Float?
+  qualifier   ResultQualifier @default(EQUAL)
+  method      String? // e.g. "BOD 3-day at 27 C"
+
+  sample    Sample    @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+  parameter Parameter @relation(fields: [parameterId], references: [id])
+
+  @@unique([sampleId, parameterId])
+  @@map("sample_result")
+}
+
+// ---------- Alerts ----------
+
+model Alert {
+  id               String        @id @default(uuid()) @db.Uuid
+  stationId        String        @map("station_id") @db.Uuid
+  parameterId      Int?          @map("parameter_id")
+  readingId        BigInt?       @map("reading_id")
+  severity         AlertSeverity
+  status           AlertStatus   @default(OPEN)
+  message          String
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  resolvedAt       DateTime?     @map("resolved_at") @db.Timestamptz(6)
+  acknowledgedById String?       @map("acknowledged_by_id")
+
+  station        Station    @relation(fields: [stationId], references: [id])
+  parameter      Parameter? @relation(fields: [parameterId], references: [id])
+  reading        Reading?   @relation(fields: [readingId], references: [id])
+  acknowledgedBy User?      @relation(fields: [acknowledgedById], references: [id])
+
+  @@index([stationId, status, createdAt])
+  @@map("alert")
 }
