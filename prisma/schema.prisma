@@ -1,5 +1,5 @@
-// Lake monitoring platform: database schema (draft for review)
-// PostgreSQL 18, Prisma 7.10.0. All times are stored in UTC.
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
   provider = "prisma-client"
@@ -10,278 +10,154 @@ datasource db {
   provider = "postgresql"
 }
 
-// ---------- Choices ----------
-
-enum Role {
-  ADMIN
-  OPERATOR
-  VIEWER
-}
-
-enum StationKind {
-  PHYSICAL
-  SIMULATED // digital twin: kept apart so test data never mixes with real data
-}
-
-enum ReadingFlag {
-  OK
-  SUSPECT
-  BAD
-}
-
-enum SampleSource {
-  LAB
-  FIELD_KIT
-}
-
-enum ResultQualifier {
-  EQUAL
-  LESS_THAN // for lab results reported as "<1"
-  GREATER_THAN
-}
-
-enum AlertSeverity {
-  LOW
-  MEDIUM
-  HIGH
-}
-
-enum AlertStatus {
-  OPEN
-  ACKNOWLEDGED
-  RESOLVED
-}
-
-// ---------- People ----------
-
-model Organisation {
-  id        String   @id @default(uuid()) @db.Uuid
-  name      String
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
-
-  users User[]
-  sites Site[]
-}
-
 model User {
-  id             String   @id @default(uuid()) @db.Uuid
-  organisationId String   @db.Uuid
-  name           String
-  email          String   @unique
-  passwordHash   String?
-  role           Role     @default(VIEWER)
-  createdAt      DateTime @default(now()) @db.Timestamptz(6)
+  id            String       @id
+  name          String
+  firstName     String       @map("first_name")
+  lastName      String       @map("last_name")
+  email         String
+  emailVerified Boolean      @default(false) @map("email_verified")
+  image         String?
+  role          String?
+  banned        Boolean?
+  banReason     String?      @map("ban_reason")
+  banExpires    DateTime?    @map("ban_expires")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+  sessions      Session[]
+  accounts      Account[]
+  members       Member[]
+  invitations   Invitation[]
+  apiKeys       Apikey[]
 
-  organisation Organisation  @relation(fields: [organisationId], references: [id])
-  calibrations Calibration[]
-  samples      Sample[]
-  alertsActed  Alert[]
-
-  @@index([organisationId])
+  @@unique([email])
+  @@map("user")
 }
 
-// ---------- Places and hardware ----------
+model Session {
+  id                   String   @id
+  userId               String   @map("user_id")
+  expiresAt            DateTime @map("expires_at")
+  token                String
+  ipAddress            String?  @map("ip_address")
+  userAgent            String?  @map("user_agent")
+  impersonatedBy       String?  @map("impersonated_by")
+  activeOrganizationId String?  @map("active_organization_id")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
 
-model Site {
-  id             String   @id @default(uuid()) @db.Uuid
-  organisationId String   @db.Uuid
-  name           String // e.g. "Fateh Sagar Lake"
-  description    String?
-  latitude       Decimal? @db.Decimal(9, 6)
-  longitude      Decimal? @db.Decimal(9, 6)
-  createdAt      DateTime @default(now()) @db.Timestamptz(6)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  organisation Organisation @relation(fields: [organisationId], references: [id])
-  stations     Station[]
-  samples      Sample[]
-
-  @@unique([organisationId, name])
+  @@unique([token])
+  @@index([userId])
+  @@map("session")
 }
 
-model Station {
-  id          String      @id @default(uuid()) @db.Uuid
-  siteId      String      @db.Uuid
+model Account {
+  id                    String    @id
+  accountId             String    @map("account_id")
+  providerId            String    @map("provider_id")
+  userId                String    @map("user_id")
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?   @map("access_token")
+  refreshToken          String?   @map("refresh_token")
+  idToken               String?   @map("id_token")
+  accessTokenExpiresAt  DateTime? @map("access_token_expires_at")
+  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at")
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime @map("expires_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+model Organization {
+  id          String       @id
   name        String
-  kind        StationKind @default(PHYSICAL)
-  latitude    Decimal?    @db.Decimal(9, 6)
-  longitude   Decimal?    @db.Decimal(9, 6)
-  installedAt DateTime?   @db.Timestamptz(6)
-  retiredAt   DateTime?   @db.Timestamptz(6)
-  createdAt   DateTime    @default(now()) @db.Timestamptz(6)
+  slug        String?      @unique
+  logo        String?
+  metadata    String?
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  members     Member[]
+  invitations Invitation[]
 
-  site          Site                 @relation(fields: [siteId], references: [id])
-  installations SensorInstallation[]
-  readings      Reading[]
-  alerts        Alert[]
-  samples       Sample[]
-
-  @@unique([siteId, name])
+  @@map("organization")
 }
 
-model Sensor {
-  id           String  @id @default(uuid()) @db.Uuid
-  serialNumber String  @unique
-  manufacturer String?
-  model        String?
-  notes        String?
+model Member {
+  id             String       @id
+  userId         String       @map("user_id")
+  organizationId String       @map("organization_id")
+  role           String
+  createdAt      DateTime     @default(now()) @map("created_at")
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  installations SensorInstallation[]
-  readings      Reading[]
-  calibrations  Calibration[]
+  @@index([userId])
+  @@index([organizationId])
+  @@map("member")
 }
 
-// Which probe sat on which station, and when. Probes get swapped;
-// this keeps old readings credited to the right probe.
-model SensorInstallation {
-  id          String    @id @default(uuid()) @db.Uuid
-  sensorId    String    @db.Uuid
-  stationId   String    @db.Uuid
-  depthM      Decimal?  @db.Decimal(6, 2)
-  installedAt DateTime  @db.Timestamptz(6)
-  removedAt   DateTime? @db.Timestamptz(6)
+model Invitation {
+  id             String        @id
+  email          String
+  inviterId      String        @map("inviter_id")
+  organizationId String?       @map("organization_id")
+  role           String
+  portal         String        @map("portal")
+  status         String
+  emailStatus    String?       @map("email_status")
+  expiresAt      DateTime      @map("expires_at")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  inviter        User          @relation(fields: [inviterId], references: [id], onDelete: Cascade)
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  sensor  Sensor  @relation(fields: [sensorId], references: [id])
-  station Station @relation(fields: [stationId], references: [id])
-
-  @@index([stationId, installedAt])
-  @@index([sensorId, installedAt])
+  @@index([organizationId])
+  @@map("invitation")
 }
 
-// ---------- What gets measured ----------
+model Apikey {
+  id                  String    @id
+  configId            String    @default("default") @map("config_id")
+  name                String?
+  start               String?
+  prefix              String?
+  key                 String
+  referenceId         String    @map("reference_id")
+  refillInterval      Int?      @map("refill_interval")
+  refillAmount        Int?      @map("refill_amount")
+  lastRefillAt        DateTime? @map("last_refill_at")
+  enabled             Boolean?
+  rateLimitEnabled    Boolean?  @map("rate_limit_enabled")
+  rateLimitTimeWindow Int?      @map("rate_limit_time_window")
+  rateLimitMax        Int?      @map("rate_limit_max")
+  requestCount        Int?      @map("request_count")
+  remaining           Int?
+  lastRequest         DateTime? @map("last_request")
+  expiresAt           DateTime? @map("expires_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+  permissions         String?
+  metadata            String?
+  user                User      @relation(fields: [referenceId], references: [id])
 
-model Parameter {
-  id   Int    @id @default(autoincrement())
-  code String @unique // e.g. "do_mgl", "ph", "turbidity_ntu"
-  name String // e.g. "Dissolved oxygen"
-  unit String // the one unit values are stored in, e.g. "mg/L"
-
-  limits        Limit[]
-  readings      Reading[]
-  sampleResults SampleResult[]
-  calibrations  Calibration[]
-  alerts        Alert[]
-}
-
-// A water quality standard, e.g. "CPCB Class C" or "BIS 10500 acceptable".
-model Standard {
-  id     Int     @id @default(autoincrement())
-  name   String  @unique
-  source String?
-
-  limits Limit[]
-}
-
-model Limit {
-  id          Int    @id @default(autoincrement())
-  standardId  Int
-  parameterId Int
-  minValue    Float?
-  maxValue    Float?
-
-  standard  Standard  @relation(fields: [standardId], references: [id])
-  parameter Parameter @relation(fields: [parameterId], references: [id])
-
-  @@unique([standardId, parameterId])
-}
-
-// ---------- Sensor data ----------
-
-// One value from one probe at one time. Raw values are never overwritten;
-// bad values are flagged instead.
-model Reading {
-  id          BigInt      @id @default(autoincrement())
-  stationId   String      @db.Uuid
-  sensorId    String      @db.Uuid
-  parameterId Int
-  measuredAt  DateTime    @db.Timestamptz(6)
-  value       Float
-  flag        ReadingFlag @default(OK)
-  receivedAt  DateTime    @default(now()) @db.Timestamptz(6)
-
-  station   Station   @relation(fields: [stationId], references: [id])
-  sensor    Sensor    @relation(fields: [sensorId], references: [id])
-  parameter Parameter @relation(fields: [parameterId], references: [id])
-  alerts    Alert[]
-
-  // The same reading sent twice after a signal gap is stored once.
-  @@unique([sensorId, parameterId, measuredAt])
-  @@index([stationId, parameterId, measuredAt])
-}
-
-// Side-by-side checks against the handheld meter, and the correction applied.
-model Calibration {
-  id             String   @id @default(uuid()) @db.Uuid
-  sensorId       String   @db.Uuid
-  parameterId    Int
-  performedAt    DateTime @db.Timestamptz(6)
-  performedById  String?  @db.Uuid
-  referenceValue Float? // what the handheld meter read
-  sensorBefore   Float? // what the probe read before cleaning
-  sensorAfter    Float? // what the probe read after cleaning
-  offset         Float? // correction to add from this time on
-  slope          Float?
-  notes          String?
-
-  sensor      Sensor    @relation(fields: [sensorId], references: [id])
-  parameter   Parameter @relation(fields: [parameterId], references: [id])
-  performedBy User?     @relation(fields: [performedById], references: [id])
-
-  @@index([sensorId, parameterId, performedAt])
-}
-
-// ---------- Lab and field-kit tests ----------
-
-model Sample {
-  id            String       @id @default(uuid()) @db.Uuid
-  siteId        String       @db.Uuid
-  stationId     String?      @db.Uuid
-  source        SampleSource
-  collectedAt   DateTime     @db.Timestamptz(6)
-  depthM        Decimal?     @db.Decimal(6, 2)
-  labName       String?
-  collectedById String?      @db.Uuid
-  notes         String?
-
-  site        Site           @relation(fields: [siteId], references: [id])
-  station     Station?       @relation(fields: [stationId], references: [id])
-  collectedBy User?          @relation(fields: [collectedById], references: [id])
-  results     SampleResult[]
-
-  @@index([siteId, collectedAt])
-}
-
-model SampleResult {
-  id          String          @id @default(uuid()) @db.Uuid
-  sampleId    String          @db.Uuid
-  parameterId Int
-  value       Float?
-  qualifier   ResultQualifier @default(EQUAL)
-  method      String? // e.g. "BOD 3-day at 27 C"
-
-  sample    Sample    @relation(fields: [sampleId], references: [id], onDelete: Cascade)
-  parameter Parameter @relation(fields: [parameterId], references: [id])
-
-  @@unique([sampleId, parameterId])
-}
-
-// ---------- Alerts ----------
-
-model Alert {
-  id               String        @id @default(uuid()) @db.Uuid
-  stationId        String        @db.Uuid
-  parameterId      Int?
-  readingId        BigInt?
-  severity         AlertSeverity
-  status           AlertStatus   @default(OPEN)
-  message          String
-  createdAt        DateTime      @default(now()) @db.Timestamptz(6)
-  resolvedAt       DateTime?     @db.Timestamptz(6)
-  acknowledgedById String?       @db.Uuid
-
-  station        Station    @relation(fields: [stationId], references: [id])
-  parameter      Parameter? @relation(fields: [parameterId], references: [id])
-  reading        Reading?   @relation(fields: [readingId], references: [id])
-  acknowledgedBy User?      @relation(fields: [acknowledgedById], references: [id])
-
-  @@index([stationId, status, createdAt])
+  @@unique([key])
+  @@index([referenceId])
+  @@index([configId])
+  @@map("apikey")
 }
