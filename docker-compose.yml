@@ -1,13 +1,93 @@
+# Local development stack. Everything connects to the local PostgreSQL in the `db` service.
+#
+#   git clone https://github.com/nawddeep/Lake_Monitoring-.git lake-monitoring-web
+#   cd lake-monitoring-web && docker compose up
+#
+# Then open http://localhost:3000. A `.env` file is optional: copy `.env.example` to `.env`
+# only to change defaults. Whatever `.env` says, the containers always use the local `db`.
+#
+# Optional sensor bridge (ESP boards post readings to it):
+#   docker compose --profile bridge up
+# macOS uses port 5000 for AirPlay; set BRIDGE_PORT=5001 there.
+
+x-local-db-url: &local-db-url postgresql://lake:${POSTGRES_PASSWORD:-change_me}@db:5432/lake_monitoring
+
 services:
   db:
     image: postgres:18
     environment:
       POSTGRES_USER: lake
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
       POSTGRES_DB: lake_monitoring
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lake -d lake_monitoring"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  app:
+    image: node:24-bookworm
+    working_dir: /app
+    # Installs dependencies (only when package-lock.json changed), applies migrations to the
+    # local database, then starts the Next.js dev server.
+    command: >
+      sh -c 'H=$$(sha1sum package-lock.json | cut -d" " -f1);
+      if [ "$$(cat node_modules/.lockhash 2>/dev/null)" != "$$H" ]; then
+        npm ci --no-audit --no-fund && echo "$$H" > node_modules/.lockhash;
+      fi;
+      npx prisma migrate deploy && npm run dev -- --hostname 0.0.0.0 --port 3000'
+    # Only these variables reach the container (values from .env or the shell, else defaults).
+    # Nothing else from .env is passed in, so production credentials never end up here.
+    environment:
+      DATABASE_URL: *local-db-url
+      DIRECT_URL: *local-db-url
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-local-dev-only-secret-never-use-in-production}
+      BETTER_AUTH_URL: http://localhost:3000
+      APP_URL: http://localhost:3000
+      INVITATION_EMAIL_ENABLED: ${INVITATION_EMAIL_ENABLED:-false}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      INNGEST_DEV: "1"
+      HUSKY: "0"
+      NEXT_TELEMETRY_DISABLED: "1"
+      PRISMA_HIDE_UPDATE_MESSAGE: "1"
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - app_node_modules:/app/node_modules
+      - app_next:/app/.next
+    depends_on:
+      db:
+        condition: service_healthy
+
+  bridge:
+    profiles: ["bridge"]
+    image: python:3.12-slim
+    working_dir: /bridge
+    command: sh -c "pip install --quiet --disable-pip-version-check -r requirements.txt && python supabase_bridge.py"
+    environment:
+      DATABASE_URL: *local-db-url
+      STATION_NAME: ${STATION_NAME:-FS_LAKE_STATION_01}
+      ALLOWED_STATIONS: ${ALLOWED_STATIONS:-FS_LAKE_STATION_01}
+      INGEST_TOKEN: ${INGEST_TOKEN:-}
+      PORT: "5000"
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "${BRIDGE_PORT:-5000}:5000"
+    volumes:
+      - ./bridge:/bridge
+      - pip_cache:/root/.cache/pip
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   pgdata:
+  app_node_modules:
+  app_next:
+  pip_cache:
